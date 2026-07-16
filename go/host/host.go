@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"larsys/go/shared"
 	"log"
 	"net"
 	"os"
@@ -11,58 +12,42 @@ import (
 	"syscall"
 )
 
-type NetworkConfig struct {
-	host string
-	port int
-}
-
-type LoggingConfig struct {
-	file  string
-	level string
-	name  string
-}
-
-type AppConfig struct {
-	max_clients int
-}
-
 func main() {
-	var network_conf NetworkConfig
-	flag.StringVar(&network_conf.host, "host", "localhost", "IP address of the host")
-	flag.IntVar(&network_conf.port, "port", 5454, "Port the host will be listening to")
-
-	var logging_conf LoggingConfig
-	flag.StringVar(&logging_conf.file, "log", "/var/log/larsys/daemon.log", "Path to daemon log file")
-	flag.StringVar(&logging_conf.level, "level", "debug", "LogLevel")
-	logging_conf.name = "DAEMON"
-
-	var app_conf AppConfig
-	flag.IntVar(&app_conf.max_clients, "max-clients", 2, "Max number of clients")
-
+	//  --- Flags
+	var host_conf shared.Node
+	flag.StringVar(&host_conf.IP, "host", "localhost", "IP address of the host")
+	flag.IntVar(&host_conf.PORT, "port", 5454, "Port the host will be listening to")
+	flag.StringVar(&host_conf.LOG.PATH, "log", "/var/log/larsys/daemon.log", "Path to daemon log file")
+	flag.StringVar(&host_conf.LOG.LEVEL, "level", "debug", "LogLevel")
 	flag.Parse()
 
-	log_f, err := os.Create(logging_conf.file)
+	// --- Hard Values
+	host_conf.LOG.NAME = "HOST DAEMON"
+	host_conf.LOG.RULES = os.O_APPEND | os.O_CREATE | os.O_WRONLY
+
+	// --- Logging
+	log_f, err := os.OpenFile(host_conf.LOG.PATH, host_conf.LOG.RULES, 0o644)
 	if err != nil {
 		panic(err)
 	}
 	defer log_f.Close()
-
 	logger := log.New(log_f, "", log.Ldate|log.Ltime)
 	logger.Println("Starting Daemon...")
 
-	addr := fmt.Sprintf("%s:%d", network_conf.host, network_conf.port)
+	// --- Listener
+	addr := fmt.Sprintf("%s:%d", host_conf.IP, host_conf.PORT)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		logger.Fatalf("Failed to listen on %s: %v", addr, err)
 	}
 	defer listener.Close()
-
 	logger.Printf("Listening on %s", addr)
 
-	// Channel to signal shutdown
+	// --- Channels
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
+	// --- Messaging
 	go func() {
 		for {
 			conn, err := listener.Accept()
@@ -74,15 +59,12 @@ func main() {
 		}
 	}()
 
-	sig := <-stop // blocks here, waiting for Ctrl+C
+	// --- Exit
+	sig := <-stop
 	logger.Printf("Received signal: %v", sig)
 	listener.Close()
 	logger.Println("Shutting down...")
 }
-
-// func ui_shutdown() {
-
-// }
 
 func handleConnection(conn net.Conn, logger *log.Logger) {
 	defer conn.Close()
