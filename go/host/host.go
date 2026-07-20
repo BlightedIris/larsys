@@ -2,6 +2,9 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"larsys/go/shared"
@@ -9,8 +12,29 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 )
+
+var PLUGIN_DIR = "/opt/larsys/plugins"
+var TOKEN_DIR = "/etc/larsys/tokens"
+var LOG_DIR = "/var/log/larsys/"
+var STATE_DIR = "/var/lib/larsys/"
+
+func init_dirs() {
+	dirs := []string{
+		PLUGIN_DIR,
+		TOKEN_DIR,
+		LOG_DIR,
+		STATE_DIR,
+	}
+
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			panic(err)
+		}
+	}
+}
 
 func main() {
 	//  --- Flags
@@ -24,6 +48,9 @@ func main() {
 	// --- Hard Values
 	host_conf.LOG.NAME = "HOST DAEMON"
 	host_conf.LOG.RULES = os.O_APPEND | os.O_CREATE | os.O_WRONLY
+
+	// --- Folders
+	init_dirs()
 
 	// --- Logging
 	log_f, err := os.OpenFile(host_conf.LOG.PATH, host_conf.LOG.RULES, 0o644)
@@ -66,6 +93,35 @@ func main() {
 	logger.Println("Shutting down...")
 }
 
+func is_registered(req shared.Request) bool {
+	clientDir := filepath.Join(TOKEN_DIR, req.SRC)
+	info, err := os.Stat(clientDir)
+	if err != nil {
+		return false
+	}
+
+	tokenBytes, err := os.ReadFile(filepath.Join(clientDir, "token"))
+	if err != nil {
+		return false
+	}
+	if info.IsDir() && req.SRC == string(tokenBytes) {
+		return true
+	} else {
+		return false
+	}
+}
+
+func register(req shared.Request) bool {
+	token := filepath.Join(TOKEN_DIR, req.SRC, "token")
+	tokenHash := sha256.Sum256([]byte(token))
+	hashString := hex.EncodeToString(tokenHash[:])
+	err := os.WriteFile(token, []byte(hashString), 0400)
+	if err != nil{
+		return false
+	}
+	return  true
+}
+
 func handleConnection(conn net.Conn, logger *log.Logger) {
 	defer conn.Close()
 
@@ -74,9 +130,43 @@ func handleConnection(conn net.Conn, logger *log.Logger) {
 
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
-		message := scanner.Text()
-		logger.Printf("Received: %s", message)
-		fmt.Fprintf(conn, "Echo: %s\n", message) // send back to client
+		var req shared.Request
+		err := json.Unmarshal(scanner.Bytes(), &req)
+
+		if err != nil {
+			logger.Printf("%s", err)
+			resp := shared.Response{STATUS: 1, MSG: "An error ocurred"}
+			respBytes, _ := json.Marshal(resp)
+			conn.Write(respBytes)
+			return
+		}
+		if is_registered(req) {
+			if req.ACTION == "register" {
+				respBytes, err := json.Marshal(shared.ALREADY_REGISTERED)
+				if err != nil {
+					resp := shared.Response{STATUS: 1, MSG: "An error ocurred"}
+					respBytes, _ := json.Marshal(resp)
+					conn.Write(respBytes)
+					return
+				}
+				conn.Write(respBytes)
+				return
+			}
+
+			// TODO: execute action
+
+		} else if req.ACTION == "register" {
+			if !register(req) {
+				resp := shared.Response{STATUS: 1, MSG: "An error ocurred while registering the client"}
+				respBytes, _ := json.Marshal(resp)
+				conn.Write(respBytes)
+				return
+			}
+		} else {
+			respBytes, _ := json.Marshal(shared.UNAUTHORISED)
+			conn.Write(respBytes)
+			return
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		logger.Printf("Scanner error: %v", err)
