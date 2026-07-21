@@ -16,25 +16,10 @@ import (
 	"syscall"
 )
 
-var PLUGIN_DIR = "/opt/larsys/plugins"
-var TOKEN_DIR = "/etc/larsys/tokens"
-var LOG_DIR = "/var/log/larsys/"
-var STATE_DIR = "/var/lib/larsys/"
-
-func init_dirs() {
-	dirs := []string{
-		PLUGIN_DIR,
-		TOKEN_DIR,
-		LOG_DIR,
-		STATE_DIR,
-	}
-
-	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			panic(err)
-		}
-	}
-}
+// This file should be called by the larsys user.
+var LARSYS_USER_UID = os.Getuid()
+var LARSYS_USER_GID = os.Getgid()
+var LARSYS_SRC string
 
 func main() {
 	//  --- Flags
@@ -43,6 +28,8 @@ func main() {
 	flag.IntVar(&host_conf.PORT, "port", 5454, "Port the host will be listening to")
 	flag.StringVar(&host_conf.LOG.PATH, "log", "/var/log/larsys/daemon.log", "Path to daemon log file")
 	flag.StringVar(&host_conf.LOG.LEVEL, "level", "debug", "LogLevel")
+	flag.StringVar(&host_conf.USERNAME, "username", shared.GetUsername(), "OS username")
+	flag.StringVar(&host_conf.DEVICE, "device", "ADMIN MACHINE", "Name of the device running the service")
 	flag.Parse()
 
 	// --- Hard Values
@@ -50,7 +37,7 @@ func main() {
 	host_conf.LOG.RULES = os.O_APPEND | os.O_CREATE | os.O_WRONLY
 
 	// --- Folders
-	init_dirs()
+	shared.InitDirs()
 
 	// --- Logging
 	log_f, err := os.OpenFile(host_conf.LOG.PATH, host_conf.LOG.RULES, 0o644)
@@ -69,7 +56,8 @@ func main() {
 	}
 	defer listener.Close()
 	logger.Printf("Listening on %s", addr)
-
+	logger.Printf("Running as %s on %s", host_conf.USERNAME, host_conf.DEVICE)
+	LARSYS_SRC = fmt.Sprintf("%s:%s", host_conf.USERNAME, host_conf.DEVICE)
 	// --- Channels
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
@@ -94,34 +82,38 @@ func main() {
 }
 
 func is_registered(req shared.Request) bool {
-	clientDir := filepath.Join(TOKEN_DIR, req.SRC)
-	info, err := os.Stat(clientDir)
-	if err != nil {
-		return false
-	}
-
-	tokenBytes, err := os.ReadFile(filepath.Join(clientDir, "token"))
-	if err != nil {
-		return false
-	}
-	if info.IsDir() && req.SRC == string(tokenBytes) {
-		return true
-	} else {
-		return false
-	}
+	_, err := os.Stat(shared.GetTokenPath(req.SRC, false))
+	return err == nil
 }
 
-func register(req shared.Request) bool {
-	token := filepath.Join(TOKEN_DIR, req.SRC, "token")
-	tokenHash := sha256.Sum256([]byte(token))
+func authorise(req shared.Request) bool {
+	tokenBytes, err := os.ReadFile(shared.GetTokenPath(req.SRC, false))
+	if err != nil {
+		return false
+	}
+	return req.TOKEN == string(tokenBytes)
+}
+
+func actionMatches(actual shared.Action, expected shared.Action) bool {
+	return actual.NAME == expected.NAME
+}
+func register(req shared.Request) (bool, error) {
+	tokenDir := filepath.Join(shared.TOKEN_DIR, "clients", req.SRC)
+	os.MkdirAll(tokenDir, 0o755)
+	os.Chown(tokenDir, os.Geteuid(), os.Getegid())
+	tokenFile := shared.GetTokenPath(req.SRC, false)
+	tokenHash := sha256.Sum256([]byte(tokenFile))
 	hashString := hex.EncodeToString(tokenHash[:])
-	err := os.WriteFile(token, []byte(hashString), 0400)
-	if err != nil{
-		return false
+	err := os.WriteFile(tokenFile, []byte(hashString), 0400)
+	if err != nil {
+		return false, err
 	}
-	return  true
+	permErr := os.Chown(tokenFile, os.Geteuid(), os.Getegid())
+	if permErr != nil {
+		return false, permErr
+	}
+	return true, nil
 }
-
 func handleConnection(conn net.Conn, logger *log.Logger) {
 	defer conn.Close()
 
@@ -132,40 +124,81 @@ func handleConnection(conn net.Conn, logger *log.Logger) {
 	for scanner.Scan() {
 		var req shared.Request
 		err := json.Unmarshal(scanner.Bytes(), &req)
-
 		if err != nil {
 			logger.Printf("%s", err)
-			resp := shared.Response{STATUS: 1, MSG: "An error ocurred"}
+			resp := shared.Response{SRC: LARSYS_SRC, STATUS: 1, MSG: "An error ocurred"}
 			respBytes, _ := json.Marshal(resp)
 			conn.Write(respBytes)
-			return
+			break
 		}
-		if is_registered(req) {
-			if req.ACTION == "register" {
-				respBytes, err := json.Marshal(shared.ALREADY_REGISTERED)
-				if err != nil {
-					resp := shared.Response{STATUS: 1, MSG: "An error ocurred"}
+		if actionMatches(req.ACTION, shared.PING) {
+			resp := shared.Response{SRC: LARSYS_SRC, STATUS: 0, MSG: "Pong"}
+			respBytes, _ := json.Marshal(resp)
+			conn.Write(respBytes)
+			break
+		} else if actionMatches(req.ACTION, shared.REGISTER) {
+			if !is_registered(req) {
+				ok, err := register(req)
+				if err != nil || !ok {
+					logger.Printf("%s", err)
+					resp := shared.Response{SRC: LARSYS_SRC, STATUS: 1, MSG: "An error ocurred while registering the client"}
 					respBytes, _ := json.Marshal(resp)
 					conn.Write(respBytes)
-					return
+				} else {
+					token, _ := os.ReadFile(shared.GetTokenPath(req.SRC, false))
+					logger.Printf("+++ Client Registered: %s +++", req.SRC)
+					resp := shared.REGISTERED
+					resp.SRC = LARSYS_SRC
+					resp.PARAMS = shared.REGISTERED_PARAMS{TOKEN: string(token)}
+					respBytes, _ := json.Marshal(resp)
+					conn.Write(respBytes)
 				}
-				conn.Write(respBytes)
-				return
-			}
-
-			// TODO: execute action
-
-		} else if req.ACTION == "register" {
-			if !register(req) {
-				resp := shared.Response{STATUS: 1, MSG: "An error ocurred while registering the client"}
+			} else {
+				logger.Printf("Client %s is already registered", req.SRC)
+				resp := shared.Response{SRC: LARSYS_SRC, STATUS: 1, MSG: "Client already registered."}
 				respBytes, _ := json.Marshal(resp)
 				conn.Write(respBytes)
-				return
 			}
+			break
+		} else if authorise(req) {
+			logger.Printf("Client %s has been recognised.", req.SRC)
+			logger.Printf("### Authentication succesfull: %s ###", req.SRC)
+
+			switch req.ACTION.NAME {
+			case shared.REVOKE.NAME:
+				tokenPath := shared.GetTokenPath(req.SRC, false)
+				_, err := os.Stat(tokenPath)
+				if err != nil {
+					resp := shared.Response{SRC: LARSYS_SRC, STATUS: 1, MSG: "Token not found"}
+					respBytes, _ := json.Marshal(resp)
+					conn.Write(respBytes)
+					break
+				}
+				delErr := os.Remove(tokenPath)
+				if delErr != nil {
+					resp := shared.Response{SRC: LARSYS_SRC, STATUS: 1, MSG: "Failed to delete token"}
+					respBytes, _ := json.Marshal(resp)
+					conn.Write(respBytes)
+					break
+				}
+				logger.Printf("--- Deleted Client: %s ---", req.SRC)
+				// case shared.PLUGIN_INSTALL:
+				// 	install_plugin(req)
+				// case shared.PLUGIN_UNINSTALL:
+				// 	uninstall_plugin(req)
+			}
+			respBytes, _ := json.Marshal(shared.OK)
+			conn.Write(respBytes)
+			break
 		} else {
+			logger.Println("Unauthorised access attempt:")
+			logger.Printf("SRC: %s", req.SRC)
+			logger.Printf("TOKEN: %s", req.TOKEN)
+			logger.Printf("ACTION: %s", req.ACTION.NAME)
+
 			respBytes, _ := json.Marshal(shared.UNAUTHORISED)
 			conn.Write(respBytes)
-			return
+			break
 		}
 	}
 	if err := scanner.Err(); err != nil {
