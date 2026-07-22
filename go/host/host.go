@@ -128,10 +128,12 @@ func handleConnection(conn net.Conn, responder proto.Responder, logger *log.Logg
 					responder.Error(conn, "An error ocurred while deleting the token", err)
 				}
 				responder.OK(conn, fmt.Sprintf("--- Deleted Client: %s ---", req.SRC))
-				// case proto.PLUGIN_INSTALL:
-				// 	install_plugin(req)
-				// case proto.PLUGIN_UNINSTALL:
-				// 	uninstall_plugin(req)
+			case proto.PLUGIN_INSTALL.NAME:
+				install_plugin(req)
+				responder.OK(conn, "Dummy installation of the plugin")
+			case proto.PLUGIN_UNINSTALL.NAME:
+				uninstall_plugin(req)
+				responder.OK(conn, "Dummy uninstal of the plugin")
 			}
 			break
 		} else {
