@@ -45,13 +45,14 @@ func main() {
 	logger := log.New(log_f, "", log.Ldate|log.Ltime)
 	logger.Println("Starting Daemon...")
 
+	addr := fmt.Sprintf("%s:%d", host_conf.IP, host_conf.PORT)
+
 	responder := proto.Responder{
 		LOGGER: logger,
-		SRC:    LARSYS_SRC,
+		SRC:    addr,
 	}
 
 	// --- Listener
-	addr := fmt.Sprintf("%s:%d", host_conf.IP, host_conf.PORT)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		logger.Fatalf("Failed to listen on %s: %v", addr, err)
