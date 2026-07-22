@@ -119,7 +119,6 @@ func handleConnection(conn net.Conn, responder proto.Responder, logger *log.Logg
 			}
 			break
 		} else if authorise(req) {
-			logger.Printf("Client %s has been recognised.", req.SRC)
 			logger.Printf("### Authentication succesfull: %s ###", req.SRC)
 			switch req.ACTION.NAME {
 			case proto.REVOKE.NAME:
