@@ -19,9 +19,12 @@ func register(req proto.Request) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	permErr := os.Chown(tokenFile, os.Geteuid(), os.Getegid())
-	if permErr != nil {
-		return false, permErr
+	// Only attempt to change ownership if running as root
+	if os.Geteuid() == 0 {
+		permErr := os.Chown(tokenFile, os.Geteuid(), os.Getegid())
+		if permErr != nil {
+			return false, permErr
+		}
 	}
 	return true, nil
 }
