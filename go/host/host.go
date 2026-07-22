@@ -123,24 +123,16 @@ func handleConnection(conn net.Conn, responder proto.Responder, logger *log.Logg
 			logger.Printf("### Authentication succesfull: %s ###", req.SRC)
 			switch req.ACTION.NAME {
 			case proto.REVOKE.NAME:
-				tokenPath := proto.GetTokenPath(req.SRC, false)
-				_, err := os.Stat(tokenPath)
+				err := revoke(req)
 				if err != nil {
-					responder.Error(conn, "Token not found", err)
-					break
+					responder.Error(conn, "An error ocurred while deleting the token", err)
 				}
-				delErr := os.Remove(tokenPath)
-				if delErr != nil {
-					responder.Error(conn, "Failed to delete token", err)
-					break
-				}
-				logger.Printf("--- Deleted Client: %s ---", req.SRC)
+				responder.OK(conn, fmt.Sprintf("--- Deleted Client: %s ---", req.SRC))
 				// case proto.PLUGIN_INSTALL:
 				// 	install_plugin(req)
 				// case proto.PLUGIN_UNINSTALL:
 				// 	uninstall_plugin(req)
 			}
-			responder.OK(conn, "")
 			break
 		} else {
 			logger.Println("Unauthorised access attempt:")
