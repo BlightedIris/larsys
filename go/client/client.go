@@ -6,11 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"larsys/go/proto"
-	"net"
+	"log"
 	"os"
 )
-
-var CLIENT_SRC string
 
 func main() {
 	// --- Flags
@@ -44,142 +42,50 @@ func main() {
 
 	// --- Folders
 	proto.InitDirs()
-
-	host := fmt.Sprintf("%s:%d", *host_ip, *host_port)
-	fmt.Printf("Hosting at %s: %s:%d\n", *host_name, *host_ip, *host_port)
-	CLIENT_SRC = fmt.Sprintf("%s:%s", client_conf.USERNAME, client_conf.DEVICE)
+	log_f, err := os.OpenFile(client_conf.LOG.PATH, client_conf.LOG.RULES, 0o644)
+	if err != nil {
+		panic(err)
+	}
+	defer log_f.Close()
+	logger := log.New(log_f, "", log.Ldate|log.Ltime)
+	logger.Printf("Hosting at %s: %s:%d\n", *host_name, *host_ip, *host_port)
+	dest := make(map[string]proto.Host)
+	dest[*host_name] = proto.Host{
+		IP:   *host_ip,
+		PORT: *host_port,
+	}
+	sender := proto.Sender{
+		LOGGER: logger,
+		SRC:    fmt.Sprintf("%s:%s", client_conf.USERNAME, client_conf.DEVICE),
+		TOKENS: make(map[string]string),
+		DST:    dest}
 	// --- Message reader
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
+		var resp proto.Response
+		var err error
 		input := scanner.Text()
-		var req proto.Request
 		switch input {
 		case "ping":
-			req = ping_request(CLIENT_SRC, client_conf.DEVICE)
+			resp, err = sender.Ping(*host_name)
 		case "register":
-			req = register_request(CLIENT_SRC, action.PARAMS)
+			resp, err = sender.Register(*host_name)
 		case "revoke":
-			req = revoke_request(CLIENT_SRC, action.PARAMS)
-			tokenBytes, err := os.ReadFile(proto.GetTokenPath(*host_name, true))
-
-			if err != nil {
-				fmt.Printf("Something went wrong: %s", err)
-			}
-
-			req.TOKEN = string(tokenBytes)
-
+			resp, err = sender.Revoke(*host_name)
 		case "plugin/install":
-			req = plugin_install_request(CLIENT_SRC, action.PARAMS)
+			resp, err = sender.PluginInstall(*host_name, proto.Manifest{})
 		case "plugin/uninstall":
-			req = plugin_uninstall_request(CLIENT_SRC, action.PARAMS)
+			resp, err = sender.PluginUninstall(*host_name, proto.Manifest{})
 		default:
 			continue
 		}
-
-		send_message(req, host, *host_name)
+		if err != nil {
+			logger.Println(err)
+		}
+		logger.Println(resp)
 	}
 
 	if scanner.Err() != nil {
 		panic("Something went wrong")
 	}
-}
-
-func ping_request(src, device string) proto.Request {
-	return proto.Request{
-		SRC: src,
-		ACTION: proto.Action{
-			NAME:   "ping",
-			PARAMS: map[string]string{"DEVICE": device},
-		},
-	}
-}
-
-func register_request(src string, params any) proto.Request {
-	return proto.Request{
-		SRC: src,
-		ACTION: proto.Action{
-			NAME:   "register",
-			PARAMS: params,
-		},
-	}
-}
-
-func revoke_request(src string, params any) proto.Request {
-	return proto.Request{
-		SRC: src,
-		ACTION: proto.Action{
-			NAME:   "revoke",
-			PARAMS: params,
-		},
-	}
-}
-
-func plugin_install_request(src string, params any) proto.Request {
-	return proto.Request{
-		SRC: src,
-		ACTION: proto.Action{
-			NAME:   "plugin/install",
-			PARAMS: params,
-		},
-	}
-}
-
-func plugin_uninstall_request(src string, params any) proto.Request {
-	return proto.Request{
-		SRC: src,
-		ACTION: proto.Action{
-			NAME:   "plugin/uninstall",
-			PARAMS: params,
-		},
-	}
-}
-
-func send_message(req proto.Request, host string, host_name string) *proto.Response {
-	conn, err := net.Dial("tcp", host)
-	if err != nil {
-		panic(err)
-	}
-	defer conn.Close()
-	token_path := proto.GetTokenPath(host_name, true)
-	tkn, err := os.ReadFile(token_path)
-	req.TOKEN = string(tkn)
-
-	reqBytes, err := json.Marshal(req)
-	if err != nil {
-		panic(err)
-	}
-
-	if _, err := conn.Write(append(reqBytes, '\n')); err != nil {
-		panic(err)
-	}
-
-	scanner := bufio.NewScanner(conn)
-	if scanner.Scan() {
-		response := scanner.Bytes()
-		fmt.Println("Response:", string(response))
-
-		var resp proto.Response
-		if err := json.Unmarshal(response, &resp); err != nil {
-			fmt.Println("response parse failed:", err)
-			return nil
-		}
-
-		if params, ok := resp.PARAMS.(map[string]any); ok {
-			if token, ok := params["TOKEN"].(string); ok {
-				if err := proto.SaveToken(host_name, token); err != nil {
-					fmt.Println("save token failed:", err)
-				} else {
-					fmt.Println("Token saved for", host_name)
-				}
-			}
-		}
-
-		return &resp
-	} else if err := scanner.Err(); err != nil {
-		fmt.Println("read failed:", err)
-	} else {
-		fmt.Println("no response received")
-	}
-
-	return nil
 }
