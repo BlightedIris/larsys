@@ -1,6 +1,9 @@
-package shared
+package proto
 
 import (
+	"encoding/json"
+	"log"
+	"net"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -80,4 +83,14 @@ func SaveToken(host, token string) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(tokenDir, "token"), []byte(token), 0o600)
+}
+
+func writeFramed(conn net.Conn, v any, logger *log.Logger) error {
+	logger.Println(v)
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	_, err = conn.Write(append(b, '\n'))
+	return err
 }
