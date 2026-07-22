@@ -38,3 +38,16 @@ func authorise(req proto.Request) bool {
 	}
 	return req.TOKEN == string(tokenBytes)
 }
+
+func revoke(req proto.Request) error {
+	tokenPath := proto.GetTokenPath(req.SRC, false)
+	_, err := os.Stat(tokenPath)
+	if err != nil {
+		return err
+	}
+	delErr := os.Remove(tokenPath)
+	if delErr != nil {
+		return err
+	}
+	return nil
+}
