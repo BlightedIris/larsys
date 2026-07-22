@@ -86,7 +86,9 @@ func SaveToken(host, token string) error {
 }
 
 func writeFramed(conn net.Conn, v any, logger *log.Logger) error {
-	logger.Println(v)
+	if logger != nil {
+		logger.Println(v)
+	}
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
