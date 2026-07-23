@@ -29,12 +29,28 @@ var REVOKE = Action{
 }
 
 type PLUGIN_INSTALL_PARAMS struct {
-	NAME string
+	NAME    string
+	VERSION string
 }
 
 var PLUGIN_INSTALL = Action{
 	NAME:   "plugin/install",
 	PARAMS: PLUGIN_INSTALL_PARAMS{},
+}
+
+type PLUGIN_DOWNLOAD_PARAMS struct {
+	NAME string
+	FILE []byte
+}
+
+type PLUGIN_UPLOAD_PARAMS struct {
+	NAME string
+	FILE []byte
+}
+
+var PLUGIN_UPLOAD = Action{
+	NAME:   "plugin/upload",
+	PARAMS: PLUGIN_UPLOAD_PARAMS{},
 }
 
 type PLUGIN_UNINSTALL_PARAMS struct {
