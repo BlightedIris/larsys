@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"larsys/go/lib"
 	"larsys/go/proto"
 	"log"
 	"net"
@@ -37,12 +38,9 @@ func main() {
 	proto.InitDirs()
 
 	// --- Logging
-	log_f, err := os.OpenFile(host_conf.LOG.PATH, host_conf.LOG.RULES, 0o644)
-	if err != nil {
-		panic(err)
-	}
-	defer log_f.Close()
-	logger := log.New(log_f, "", log.Ldate|log.Ltime)
+	logger := lib.GetLogger(host_conf.LOG.PATH, host_conf.LOG.RULES, log.Ldate|log.Ltime)
+	defer logger.Close()
+
 	logger.Println("Starting Daemon...")
 
 	addr := fmt.Sprintf("%s:%d", host_conf.IP, host_conf.PORT)
@@ -84,11 +82,7 @@ func main() {
 	logger.Println("Shutting down...")
 }
 
-func actionMatches(actual proto.Action, expected proto.Action) bool {
-	return actual.NAME == expected.NAME
-}
-
-func handleConnection(conn net.Conn, responder proto.Responder, logger *log.Logger) {
+func handleConnection(conn net.Conn, responder proto.Responder, logger *lib.Logger) {
 	defer conn.Close()
 
 	addr := conn.RemoteAddr().String()
@@ -102,13 +96,13 @@ func handleConnection(conn net.Conn, responder proto.Responder, logger *log.Logg
 			responder.Error(conn, "", err)
 			break
 		}
-		if actionMatches(req.ACTION, proto.PING) {
+		if proto.ActionMatches(req.ACTION, proto.PING) {
 			resp := proto.Response{SRC: LARSYS_SRC, STATUS: 0, MSG: "Pong"}
 			responder.Respond(conn, resp)
 			break
-		} else if actionMatches(req.ACTION, proto.REGISTER) {
-			if !is_registered(req) {
-				ok, err := register(req)
+		} else if proto.ActionMatches(req.ACTION, proto.REGISTER) {
+			if !proto.IsRegistered(req) {
+				ok, err := proto.Register(req)
 				if err != nil || !ok {
 					responder.Error(conn, "An error ocurred when registering the client", err)
 				} else {
@@ -119,17 +113,17 @@ func handleConnection(conn net.Conn, responder proto.Responder, logger *log.Logg
 				responder.AlreadyRegistered(conn)
 			}
 			break
-		} else if authorise(req) {
+		} else if proto.Authorise(req) {
 			logger.Printf("### Authentication succesfull: %s ###", req.SRC)
 			switch req.ACTION.NAME {
 			case proto.REVOKE.NAME:
-				err := revoke(req)
+				err := proto.Revoke(req)
 				if err != nil {
 					responder.Error(conn, "An error ocurred while deleting the token", err)
 				}
 				responder.OK(conn, fmt.Sprintf("--- Deleted Client: %s ---", req.SRC))
 			case proto.PLUGIN_INSTALL.NAME:
-				install_plugin(req)
+				responder.Respond(conn, install_plugin(req))
 				responder.OK(conn, "Dummy installation of the plugin")
 			case proto.PLUGIN_UNINSTALL.NAME:
 				uninstall_plugin(req)
