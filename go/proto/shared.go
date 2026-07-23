@@ -1,12 +1,8 @@
 package proto
 
 import (
-	"encoding/json"
-	"log"
-	"net"
 	"os"
 	"os/user"
-	"path/filepath"
 )
 
 var PLUGIN_DIR = "/opt/larsys/plugins"
@@ -32,37 +28,12 @@ func InitDirs() {
 	}
 }
 
-type LoggingConfig struct {
-	PATH  string
-	RULES int
-	LEVEL string
-	NAME  string
-}
-
-type Node struct {
-	IP       string
-	PORT     int
-	LOG      LoggingConfig
-	USERNAME string
-	DEVICE   string
-}
-
 func GetUsername() string {
 	u, err := user.Current()
 	if err != nil {
 		panic(err)
 	}
 	return u.Username
-}
-
-func GetTokenPath(name string, host bool) string {
-	var dest string
-	if host {
-		dest = "hosts"
-	} else {
-		dest = "clients"
-	}
-	return filepath.Join(TOKEN_DIR, dest, name, "token")
 }
 
 func ExtractParam(obj map[string]any, param string) any {
@@ -77,22 +48,6 @@ func ExtractParam(obj map[string]any, param string) any {
 	return nil
 }
 
-func SaveToken(host, token string) error {
-	tokenDir := filepath.Join(TOKEN_DIR, "hosts", host)
-	if err := os.MkdirAll(tokenDir, 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(tokenDir, "token"), []byte(token), 0o600)
-}
-
-func writeFramed(conn net.Conn, v any, logger *log.Logger) error {
-	if logger != nil {
-		logger.Println(v)
-	}
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	_, err = conn.Write(append(b, '\n'))
-	return err
+func ActionMatches(actual Action, expected Action) bool {
+	return actual.NAME == expected.NAME
 }
