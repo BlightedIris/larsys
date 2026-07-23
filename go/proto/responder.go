@@ -2,7 +2,7 @@ package proto
 
 import (
 	"errors"
-	"log"
+	"larsys/go/lib"
 	"net"
 )
 
@@ -14,11 +14,11 @@ type Response struct {
 }
 
 type Responder struct {
-	LOGGER *log.Logger
+	LOGGER *lib.Logger
 	SRC    string
 }
 
-func NewResponder(src string, logger *log.Logger) *Responder {
+func NewResponder(src string, logger *lib.Logger) *Responder {
 	return &Responder{
 		LOGGER: logger,
 		SRC:    src,
