@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"larsys/go/lib"
 	"net"
 	"os"
 )
@@ -27,18 +27,36 @@ type Request struct {
 }
 
 type Sender struct {
-	LOGGER *log.Logger
+	LOGGER *lib.Logger
 	SRC    string
 	TOKENS map[string]string
 	DST    map[string]Host
 }
 
-func NewSender(src string, tokenPath map[string]string, logger *log.Logger, destination map[string]Host) *Sender {
+func NewSender(src string, tokenPath map[string]string, logger *lib.Logger, destination map[string]Host) *Sender {
 	return &Sender{
 		DST:    destination,
 		LOGGER: logger,
 		SRC:    src,
 		TOKENS: tokenPath,
+	}
+}
+
+func (s *Sender) AddHost(name, ip string, port int) {
+	s.DST[name] = Host{
+		IP:   ip,
+		PORT: port,
+	}
+	if s.LOGGER != nil {
+		s.LOGGER.Printf("+++ Added host %s: %s:%d", name, ip, port)
+	}
+}
+
+func (s *Sender) RemoveHost(name string) {
+	delete(s.DST, name)
+
+	if s.LOGGER != nil {
+		s.LOGGER.Printf("--- Removed host %s", name)
 	}
 }
 
@@ -144,7 +162,7 @@ func (s *Sender) Revoke(dst string) (Response, error) {
 	})
 }
 
-func (s *Sender) PluginInstall(dst string, params Manifest) (Response, error) {
+func (s *Sender) PluginInstall(dst string, params PLUGIN) (Response, error) {
 	return s.Send(Request{
 		SRC: s.SRC,
 		DST: dst,
@@ -155,7 +173,7 @@ func (s *Sender) PluginInstall(dst string, params Manifest) (Response, error) {
 	})
 }
 
-func (s *Sender) PluginUninstall(dst string, params Manifest) (Response, error) {
+func (s *Sender) PluginUninstall(dst string, params PLUGIN) (Response, error) {
 	return s.Send(Request{
 		SRC: s.SRC,
 		ACTION: Action{
