@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"larsys/go/lib"
 	"larsys/go/proto"
 	"log"
 	"os"
@@ -42,12 +43,11 @@ func main() {
 
 	// --- Folders
 	proto.InitDirs()
-	log_f, err := os.OpenFile(client_conf.LOG.PATH, client_conf.LOG.RULES, 0o644)
-	if err != nil {
-		panic(err)
-	}
-	defer log_f.Close()
-	logger := log.New(log_f, "", log.Ldate|log.Ltime)
+
+	// --- Logging
+	logger := lib.GetLogger(client_conf.LOG.PATH, client_conf.LOG.RULES, log.Ldate|log.Ltime)
+	defer logger.Close()
+
 	logger.Printf("Hosting at %s: %s:%d\n", *host_name, *host_ip, *host_port)
 	dest := make(map[string]proto.Host)
 	dest[*host_name] = proto.Host{
@@ -59,6 +59,7 @@ func main() {
 		SRC:    fmt.Sprintf("%s:%s", client_conf.USERNAME, client_conf.DEVICE),
 		TOKENS: make(map[string]string),
 		DST:    dest}
+
 	// --- Message reader
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
@@ -73,9 +74,9 @@ func main() {
 		case "revoke":
 			resp, err = sender.Revoke(*host_name)
 		case "plugin/install":
-			resp, err = sender.PluginInstall(*host_name, proto.Manifest{})
+			resp, err = sender.PluginInstall(*host_name, proto.PLUGIN{})
 		case "plugin/uninstall":
-			resp, err = sender.PluginUninstall(*host_name, proto.Manifest{})
+			resp, err = sender.PluginUninstall(*host_name, proto.PLUGIN{})
 		default:
 			continue
 		}
